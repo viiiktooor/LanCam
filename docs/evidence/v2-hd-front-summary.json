@@ -1,0 +1,53 @@
+{
+  "frames": 272,
+  "duration_seconds": 20.0,
+  "received_fps": 13.998656955421307,
+  "image_sizes": [
+    [
+      640,
+      480
+    ],
+    [
+      1280,
+      720
+    ]
+  ],
+  "jpeg_bytes": 14145501,
+  "error": null,
+  "settings": {
+    "name": "LanCam",
+    "version": "1.2.1",
+    "pipeline": "nv21-v2",
+    "camera": "front",
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "jpegQuality": 70,
+    "mirrorFront": true,
+    "torch": false,
+    "captureFps": 0,
+    "encodedFps": 0,
+    "encodeMs": 0,
+    "replacedFrames": 0
+  },
+  "captureFps": {
+    "mean": 12.42,
+    "min": 0,
+    "max": 30.4
+  },
+  "encodedFps": {
+    "mean": 11.6,
+    "min": 0,
+    "max": 29.0
+  },
+  "encodeMs": {
+    "mean": 5.855,
+    "min": 0,
+    "max": 13.0
+  },
+  "replacedFrames": {
+    "mean": 0,
+    "min": 0,
+    "max": 0
+  }
+}

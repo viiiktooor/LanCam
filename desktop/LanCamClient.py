@@ -17,7 +17,7 @@ from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 DEFAULT_PORT = 4747
 RELEASE_API = "https://api.github.com/repos/viiiktooor/LanCam/releases/latest"
 ASSET_PATTERN = re.compile(r"^LanCamClient-([0-9]+(?:\.[0-9]+){1,3})\.exe$", re.I)

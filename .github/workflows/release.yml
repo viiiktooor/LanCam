@@ -36,13 +36,27 @@ jobs:
           LANCAM_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           test -n "$LANCAM_KEYSTORE_PASSWORD" || (echo "ANDROID_KEYSTORE_PASSWORD secret is missing" && exit 1)
-          gradle --no-daemon assembleRelease
+          gradle --no-daemon verifyFramePipeline lintRelease assembleRelease
           VERSION=$(grep "versionName" app/build.gradle | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
           cp app/build/outputs/apk/release/app-release.apk "LanCam-Android-$VERSION.apk"
+      - name: Verify existing Android signing certificate
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/viiiktooor/LanCam/releases/download/v1.2.1/LanCam-Android-1.2.1.apk \
+            --output "$RUNNER_TEMP/official.apk"
+          SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$SIGNER" verify --print-certs "$RUNNER_TEMP/official.apk" > "$RUNNER_TEMP/official-cert.txt"
+          "$SIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk > "$RUNNER_TEMP/new-cert.txt"
+          EXPECTED=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/official-cert.txt")
+          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/new-cert.txt")
+          test -n "$EXPECTED" && test "$EXPECTED" = "$ACTUAL"
       - uses: actions/upload-artifact@v4
         with:
           name: release-android
           path: LanCam-Android-*.apk
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lancam-release.jks"
 
   windows:
     runs-on: windows-latest
@@ -86,7 +100,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(tr -d '[:space:]' < release/version.txt)
+          (cd release-assets && sha256sum *.apk *.exe > SHA256SUMS.txt)
           gh release create "v$VERSION" release-assets/* \
+            --target "$GITHUB_SHA" \
             --title "LanCam $VERSION" \
-            --notes "LanCam Android e LanCam Client para Windows. Esta release é usada pelo atualizador automático dos dois aplicativos." \
+            --notes-file release/NOTES.md \
             --latest

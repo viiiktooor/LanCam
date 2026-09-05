@@ -1,0 +1,50 @@
+{
+  "url": "http://PHONE_IP:4747",
+  "frames": 419,
+  "duration_seconds": 20.0,
+  "received_fps": 21.148494814065888,
+  "image_sizes": [
+    [
+      1280,
+      720
+    ]
+  ],
+  "jpeg_bytes": 33279244,
+  "error": null,
+  "settings": {
+    "name": "LanCam",
+    "version": "1.2.1",
+    "pipeline": "nv21-v3",
+    "camera": "front",
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "jpegQuality": 70,
+    "mirrorFront": true,
+    "torch": false,
+    "captureFps": 29.3,
+    "encodedFps": 29.3,
+    "encodeMs": 14.3,
+    "replacedFrames": 0
+  },
+  "captureFps": {
+    "mean": 29.995,
+    "min": 29.3,
+    "max": 30.8
+  },
+  "encodedFps": {
+    "mean": 29.995,
+    "min": 29.3,
+    "max": 30.8
+  },
+  "encodeMs": {
+    "mean": 14.22,
+    "min": 13.1,
+    "max": 14.7
+  },
+  "replacedFrames": {
+    "mean": 0,
+    "min": 0,
+    "max": 0
+  }
+}

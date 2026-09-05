@@ -571,7 +571,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         int h = size == null ? targetHeight : size.height;
         return "{" +
                 "\"name\":\"LanCam\"," +
-                "\"version\":\"1.2.1\"," +
+                "\"version\":\"1.2.2\"," +
                 "\"pipeline\":\"nv21-v3\"," +
                 "\"camera\":\"" + (front ? "front" : "back") + "\"," +
                 "\"width\":" + w + "," +

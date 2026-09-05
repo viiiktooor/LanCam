@@ -5,3 +5,4 @@ __pycache__/
 dist/
 *.spec
 local.properties
+diagnostics-output/
