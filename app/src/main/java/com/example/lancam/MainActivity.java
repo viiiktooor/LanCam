@@ -3,7 +3,10 @@ package com.example.lancam;
 import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
+import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.graphics.YuvImage;
@@ -13,8 +16,11 @@ import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.TextureView;
 import android.view.WindowManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.io.BufferedReader;
@@ -27,23 +33,42 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
 @SuppressWarnings("deprecation")
 public class MainActivity extends Activity implements TextureView.SurfaceTextureListener, Camera.PreviewCallback {
     private static final int REQ_CAMERA = 10;
     private static final int PORT = 4747;
-    private static final long FRAME_INTERVAL_MS = 100;
+
+    private static final String[] RESOLUTION_LABELS = {"640×480", "1280×720", "1920×1080"};
+    private static final int[][] RESOLUTIONS = {{640, 480}, {1280, 720}, {1920, 1080}};
+    private static final String[] FPS_LABELS = {"5 fps", "10 fps", "15 fps", "20 fps", "30 fps"};
+    private static final int[] FPS_VALUES = {5, 10, 15, 20, 30};
+    private static final String[] QUALITY_LABELS = {"50%", "70%", "85%", "95%"};
+    private static final int[] QUALITY_VALUES = {50, 70, 85, 95};
 
     private final AtomicReference<byte[]> latestFrame = new AtomicReference<>();
     private TextureView preview;
     private TextView status;
+    private TextView details;
+    private Button torchButton;
+    private Button mirrorButton;
     private Camera camera;
     private Camera.Size previewSize;
+    private int currentCameraId = -1;
     private boolean front;
+    private boolean torchEnabled;
+    private boolean mirrorFront = true;
+    private int targetWidth = 1280;
+    private int targetHeight = 720;
+    private volatile int targetFps = 10;
+    private volatile int jpegQuality = 70;
+    private volatile int streamRotation;
     private long lastFrameTime;
     private MjpegServer server;
 
@@ -52,7 +77,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         buildUi();
-        server = new MjpegServer(PORT, latestFrame);
+        server = new MjpegServer(PORT, latestFrame, this::statusJson);
         server.start();
 
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -66,29 +91,110 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(12, 12, 12, 12);
+        root.setPadding(10, 10, 10, 10);
 
         preview = new TextureView(this);
         root.addView(preview, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        LinearLayout bar = new LinearLayout(this);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout infoBar = new LinearLayout(this);
+        infoBar.setGravity(Gravity.CENTER_VERTICAL);
 
+        LinearLayout textBox = new LinearLayout(this);
+        textBox.setOrientation(LinearLayout.VERTICAL);
         status = new TextView(this);
-        status.setTextSize(15f);
-        bar.addView(status, new LinearLayout.LayoutParams(0,
+        status.setTextSize(14f);
+        details = new TextView(this);
+        details.setTextSize(12f);
+        textBox.addView(status);
+        textBox.addView(details);
+        infoBar.addView(textBox, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         Button swap = new Button(this);
         swap.setText("Trocar câmera");
         swap.setOnClickListener(v -> {
             front = !front;
+            torchEnabled = false;
             restartCamera();
         });
-        bar.addView(swap);
-        root.addView(bar);
+        infoBar.addView(swap);
+        root.addView(infoBar);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+
+        Spinner resolution = makeSpinner(RESOLUTION_LABELS, 1);
+        resolution.setOnItemSelectedListener(new SimpleSelectionListener() {
+            @Override public void selected(int position) {
+                int newW = RESOLUTIONS[position][0];
+                int newH = RESOLUTIONS[position][1];
+                if (newW == targetWidth && newH == targetHeight) return;
+                targetWidth = newW;
+                targetHeight = newH;
+                restartCamera();
+            }
+        });
+        controls.addView(resolution, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        Spinner fps = makeSpinner(FPS_LABELS, 1);
+        fps.setOnItemSelectedListener(new SimpleSelectionListener() {
+            @Override public void selected(int position) {
+                targetFps = FPS_VALUES[position];
+                updateStatus();
+            }
+        });
+        controls.addView(fps, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        Spinner quality = makeSpinner(QUALITY_LABELS, 1);
+        quality.setOnItemSelectedListener(new SimpleSelectionListener() {
+            @Override public void selected(int position) {
+                jpegQuality = QUALITY_VALUES[position];
+                updateStatus();
+            }
+        });
+        controls.addView(quality, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        torchButton = new Button(this);
+        torchButton.setText("Flash: off");
+        torchButton.setOnClickListener(v -> {
+            torchEnabled = !torchEnabled;
+            applyTorch();
+        });
+        controls.addView(torchButton);
+
+        mirrorButton = new Button(this);
+        mirrorButton.setText("Espelho: sim");
+        mirrorButton.setOnClickListener(v -> {
+            mirrorFront = !mirrorFront;
+            mirrorButton.setText(mirrorFront ? "Espelho: sim" : "Espelho: não");
+            updateStatus();
+        });
+        controls.addView(mirrorButton);
+
+        root.addView(controls);
         setContentView(root);
+    }
+
+    private Spinner makeSpinner(String[] items, int selected) {
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, items);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(selected);
+        return spinner;
+    }
+
+    private abstract static class SimpleSelectionListener implements AdapterView.OnItemSelectedListener {
+        @Override public void onItemSelected(AdapterView<?> parent, android.view.View view, int position, long id) {
+            selected(position);
+        }
+        @Override public void onNothingSelected(AdapterView<?> parent) { }
+        public abstract void selected(int position);
     }
 
     @Override
@@ -126,7 +232,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void restartCamera() {
-        if (!preview.isAvailable()) return;
+        if (preview == null || !preview.isAvailable()) {
+            updateStatus();
+            return;
+        }
         releaseCamera();
         openCamera(preview.getSurfaceTexture());
     }
@@ -135,21 +244,29 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         try {
             int id = chooseCamera(front);
             if (id < 0) throw new IllegalStateException("Nenhuma câmera encontrada");
+            currentCameraId = id;
             camera = Camera.open(id);
             Camera.Parameters params = camera.getParameters();
-            previewSize = choosePreviewSize(params.getSupportedPreviewSizes());
+            previewSize = choosePreviewSize(params.getSupportedPreviewSizes(), targetWidth, targetHeight);
             params.setPreviewSize(previewSize.width, previewSize.height);
             params.setPreviewFormat(ImageFormat.NV21);
+            setClosestFpsRange(params, targetFps);
+
             List<String> focus = params.getSupportedFocusModes();
             if (focus != null && focus.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
                 params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
             }
+            applyTorchToParameters(params);
             camera.setParameters(params);
-            camera.setDisplayOrientation(displayOrientation(id));
+
+            int displayRotation = displayOrientation(id);
+            streamRotation = rawFrameRotation(id);
+            camera.setDisplayOrientation(displayRotation);
             surface.setDefaultBufferSize(previewSize.width, previewSize.height);
             camera.setPreviewTexture(surface);
             camera.setPreviewCallback(this);
             camera.startPreview();
+            refreshTorchButton();
             updateStatus();
         } catch (Exception e) {
             releaseCamera();
@@ -169,45 +286,167 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         return fallback;
     }
 
-    private Camera.Size choosePreviewSize(List<Camera.Size> sizes) {
+    private Camera.Size choosePreviewSize(List<Camera.Size> sizes, int wantedW, int wantedH) {
         Camera.Size best = sizes.get(0);
-        long target = 1280L * 720L;
-        long delta = Math.abs((long) best.width * best.height - target);
+        double wantedRatio = (double) wantedW / wantedH;
+        double bestScore = sizeScore(best, wantedW, wantedH, wantedRatio);
         for (Camera.Size s : sizes) {
-            long d = Math.abs((long) s.width * s.height - target);
-            if (d < delta) {
+            double score = sizeScore(s, wantedW, wantedH, wantedRatio);
+            if (score < bestScore) {
                 best = s;
-                delta = d;
+                bestScore = score;
             }
         }
         return best;
     }
 
+    private double sizeScore(Camera.Size size, int wantedW, int wantedH, double wantedRatio) {
+        long wantedArea = (long) wantedW * wantedH;
+        long area = (long) size.width * size.height;
+        double areaError = Math.abs(area - wantedArea) / (double) wantedArea;
+        double ratio = (double) Math.max(size.width, size.height) / Math.min(size.width, size.height);
+        double normalizedWantedRatio = Math.max(wantedRatio, 1.0 / wantedRatio);
+        double ratioError = Math.abs(ratio - normalizedWantedRatio);
+        return areaError + ratioError * 4.0;
+    }
+
+    private void setClosestFpsRange(Camera.Parameters params, int fps) {
+        try {
+            List<int[]> ranges = params.getSupportedPreviewFpsRange();
+            if (ranges == null || ranges.isEmpty()) return;
+            int wanted = fps * 1000;
+            int[] best = ranges.get(0);
+            long bestScore = Long.MAX_VALUE;
+            for (int[] range : ranges) {
+                long score;
+                if (wanted >= range[0] && wanted <= range[1]) {
+                    score = (long) (range[1] - range[0]) + Math.abs(range[1] - wanted);
+                } else {
+                    score = Math.min(Math.abs((long) range[0] - wanted), Math.abs((long) range[1] - wanted)) + 1_000_000L;
+                }
+                if (score < bestScore) {
+                    best = range;
+                    bestScore = score;
+                }
+            }
+            params.setPreviewFpsRange(best[0], best[1]);
+        } catch (RuntimeException ignored) { }
+    }
+
     private int displayOrientation(int cameraId) {
         Camera.CameraInfo info = new Camera.CameraInfo();
         Camera.getCameraInfo(cameraId, info);
-        int rotation = getWindowManager().getDefaultDisplay().getRotation();
-        int degrees = rotation == 1 ? 90 : rotation == 2 ? 180 : rotation == 3 ? 270 : 0;
+        int degrees = displayDegrees();
         if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
             return (360 - ((info.orientation + degrees) % 360)) % 360;
         }
         return (info.orientation - degrees + 360) % 360;
     }
 
+    private int rawFrameRotation(int cameraId) {
+        Camera.CameraInfo info = new Camera.CameraInfo();
+        Camera.getCameraInfo(cameraId, info);
+        int degrees = displayDegrees();
+        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            return (info.orientation + degrees) % 360;
+        }
+        return (info.orientation - degrees + 360) % 360;
+    }
+
+    private int displayDegrees() {
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        return rotation == 1 ? 90 : rotation == 2 ? 180 : rotation == 3 ? 270 : 0;
+    }
+
     @Override
     public void onPreviewFrame(byte[] data, Camera source) {
         if (previewSize == null || data == null) return;
         long now = SystemClock.elapsedRealtime();
-        if (now - lastFrameTime < FRAME_INTERVAL_MS) return;
+        long interval = Math.max(1L, 1000L / Math.max(1, targetFps));
+        if (now - lastFrameTime < interval) return;
         lastFrameTime = now;
+
         try {
+            int firstPassQuality = (streamRotation != 0 || (front && mirrorFront)) ? 92 : jpegQuality;
             YuvImage yuv = new YuvImage(data, ImageFormat.NV21,
                     previewSize.width, previewSize.height, null);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            if (yuv.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 70, out)) {
-                latestFrame.set(out.toByteArray());
+            if (!yuv.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), firstPassQuality, out)) {
+                return;
             }
+            byte[] jpg = out.toByteArray();
+            if (streamRotation != 0 || (front && mirrorFront)) {
+                jpg = transformJpeg(jpg, streamRotation, front && mirrorFront, jpegQuality);
+            }
+            if (jpg != null) latestFrame.set(jpg);
         } catch (RuntimeException ignored) { }
+    }
+
+    private byte[] transformJpeg(byte[] jpg, int rotation, boolean mirror, int quality) {
+        Bitmap src = null;
+        Bitmap transformed = null;
+        try {
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inPreferredConfig = Bitmap.Config.RGB_565;
+            src = BitmapFactory.decodeByteArray(jpg, 0, jpg.length, options);
+            if (src == null) return jpg;
+            Matrix matrix = new Matrix();
+            if (rotation != 0) matrix.postRotate(rotation);
+            if (mirror) matrix.postScale(-1f, 1f);
+            transformed = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), matrix, true);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            transformed.compress(Bitmap.CompressFormat.JPEG, quality, out);
+            return out.toByteArray();
+        } catch (RuntimeException e) {
+            return jpg;
+        } finally {
+            if (transformed != null && transformed != src && !transformed.isRecycled()) transformed.recycle();
+            if (src != null && !src.isRecycled()) src.recycle();
+        }
+    }
+
+    private void applyTorch() {
+        if (camera == null) {
+            torchEnabled = false;
+            refreshTorchButton();
+            return;
+        }
+        try {
+            Camera.Parameters params = camera.getParameters();
+            if (!supportsTorch(params)) {
+                torchEnabled = false;
+            }
+            applyTorchToParameters(params);
+            camera.setParameters(params);
+        } catch (RuntimeException e) {
+            torchEnabled = false;
+        }
+        refreshTorchButton();
+        updateStatus();
+    }
+
+    private void applyTorchToParameters(Camera.Parameters params) {
+        if (!supportsTorch(params)) {
+            torchEnabled = false;
+            return;
+        }
+        params.setFlashMode(torchEnabled ? Camera.Parameters.FLASH_MODE_TORCH : Camera.Parameters.FLASH_MODE_OFF);
+    }
+
+    private boolean supportsTorch(Camera.Parameters params) {
+        List<String> modes = params.getSupportedFlashModes();
+        return modes != null && modes.contains(Camera.Parameters.FLASH_MODE_TORCH)
+                && modes.contains(Camera.Parameters.FLASH_MODE_OFF);
+    }
+
+    private void refreshTorchButton() {
+        if (torchButton == null) return;
+        boolean supported = false;
+        try {
+            supported = camera != null && supportsTorch(camera.getParameters());
+        } catch (RuntimeException ignored) { }
+        torchButton.setEnabled(supported);
+        torchButton.setText(torchEnabled && supported ? "Flash: on" : "Flash: off");
     }
 
     private void releaseCamera() {
@@ -216,15 +455,38 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         try { camera.stopPreview(); } catch (Exception ignored) { }
         try { camera.release(); } catch (Exception ignored) { }
         camera = null;
+        currentCameraId = -1;
+        previewSize = null;
     }
 
     private void updateStatus() {
         String ip = localIpv4();
+        if (status == null) return;
         if (ip == null) {
             status.setText("Conecte celular e PC à mesma rede Wi‑Fi.");
         } else {
             status.setText("No PC: http://" + ip + ":" + PORT + "/");
         }
+        String size = previewSize == null ? targetWidth + "×" + targetHeight : previewSize.width + "×" + previewSize.height;
+        details.setText(String.format(Locale.US, "%s · %d fps · JPEG %d%% · %s",
+                size, targetFps, jpegQuality, front ? "frontal" : "traseira"));
+    }
+
+    private String statusJson() {
+        Camera.Size size = previewSize;
+        int w = size == null ? targetWidth : size.width;
+        int h = size == null ? targetHeight : size.height;
+        return "{" +
+                "\"name\":\"LanCam\"," +
+                "\"version\":\"1.1.0\"," +
+                "\"camera\":\"" + (front ? "front" : "back") + "\"," +
+                "\"width\":" + w + "," +
+                "\"height\":" + h + "," +
+                "\"fps\":" + targetFps + "," +
+                "\"jpegQuality\":" + jpegQuality + "," +
+                "\"mirrorFront\":" + mirrorFront + "," +
+                "\"torch\":" + torchEnabled +
+                "}";
     }
 
     private static String localIpv4() {
@@ -247,16 +509,22 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) { releaseCamera(); return true; }
     @Override public void onSurfaceTextureUpdated(SurfaceTexture surface) { }
 
+    private interface StatusProvider {
+        String getStatusJson();
+    }
+
     private static final class MjpegServer extends Thread {
         private final int port;
         private final AtomicReference<byte[]> frame;
+        private final StatusProvider statusProvider;
         private volatile boolean running = true;
         private ServerSocket serverSocket;
 
-        MjpegServer(int port, AtomicReference<byte[]> frame) {
+        MjpegServer(int port, AtomicReference<byte[]> frame, StatusProvider statusProvider) {
             super("LanCamServer");
             this.port = port;
             this.frame = frame;
+            this.statusProvider = statusProvider;
             setDaemon(true);
         }
 
@@ -266,7 +534,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 serverSocket = new ServerSocket(port);
                 while (running) {
                     Socket socket = serverSocket.accept();
-                    Thread t = new Thread(() -> handle(socket));
+                    Thread t = new Thread(() -> handle(socket), "LanCamClient");
                     t.setDaemon(true);
                     t.start();
                 }
@@ -280,6 +548,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         private void handle(Socket socket) {
             try (Socket s = socket) {
+                s.setTcpNoDelay(true);
                 BufferedReader reader = new BufferedReader(new InputStreamReader(
                         s.getInputStream(), StandardCharsets.ISO_8859_1));
                 String request = reader.readLine();
@@ -287,21 +556,32 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 String line;
                 while ((line = reader.readLine()) != null && !line.isEmpty()) { }
                 String[] parts = request.split(" ");
-                String path = parts.length > 1 ? parts[1] : "/";
-                if (path.startsWith("/stream")) stream(s.getOutputStream());
+                String path = parts.length > 1 ? URLDecoder.decode(parts[1], "UTF-8") : "/";
+                if (path.startsWith("/stream") || path.startsWith("/video")) stream(s.getOutputStream());
                 else if (path.startsWith("/shot.jpg")) snapshot(s.getOutputStream());
+                else if (path.startsWith("/api/status")) status(s.getOutputStream());
                 else index(s.getOutputStream());
             } catch (IOException ignored) { }
         }
 
         private void index(OutputStream out) throws IOException {
-            String html = "<!doctype html><html><meta name='viewport' content='width=device-width'>" +
-                    "<title>LanCam</title><body style='margin:0;background:#111;color:white;text-align:center;font-family:sans-serif'>" +
-                    "<h2>LanCam</h2><img src='/stream' style='max-width:100%;height:auto'>" +
-                    "<p><a style='color:#9cf' href='/shot.jpg'>Foto atual</a></p></body></html>";
+            String html = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" +
+                    "<title>LanCam</title><style>body{margin:0;background:#111;color:#eee;text-align:center;font-family:sans-serif}" +
+                    "main{max-width:1100px;margin:auto;padding:12px}img{max-width:100%;max-height:82vh;border-radius:8px}" +
+                    "a{color:#9cf}small{color:#aaa}</style></head><body><main><h2>LanCam</h2>" +
+                    "<img src='/stream'><p><a href='/shot.jpg'>Foto atual</a> · <a href='/api/status'>Status JSON</a></p>" +
+                    "<small>Stream MJPEG local · porta " + port + "</small></main></body></html>";
             byte[] body = html.getBytes(StandardCharsets.UTF_8);
             write(out, "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: " +
-                    body.length + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
+                    body.length + "\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
+            out.write(body);
+            out.flush();
+        }
+
+        private void status(OutputStream out) throws IOException {
+            byte[] body = statusProvider.getStatusJson().getBytes(StandardCharsets.UTF_8);
+            write(out, "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: " +
+                    body.length + "\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
             out.write(body);
             out.flush();
         }
@@ -311,11 +591,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             if (jpg == null) {
                 byte[] body = "Camera iniciando".getBytes(StandardCharsets.UTF_8);
                 write(out, "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: " +
-                        body.length + "\r\nConnection: close\r\n\r\n");
+                        body.length + "\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
                 out.write(body);
             } else {
                 write(out, "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: " +
-                        jpg.length + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
+                        jpg.length + "\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
                 out.write(jpg);
             }
             out.flush();
@@ -323,7 +603,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         private void stream(OutputStream out) throws IOException {
             write(out, "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n" +
-                    "Cache-Control: no-store\r\nConnection: close\r\n\r\n");
+                    "Cache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
             byte[] last = null;
             while (running) {
                 byte[] jpg = frame.get();
@@ -334,7 +614,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     out.flush();
                     last = jpg;
                 }
-                SystemClock.sleep(25);
+                SystemClock.sleep(10);
             }
         }
 
