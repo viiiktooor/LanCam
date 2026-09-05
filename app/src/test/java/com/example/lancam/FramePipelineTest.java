@@ -31,7 +31,7 @@ public final class FramePipelineTest {
         FramePacer pacer = new FramePacer();
         int accepted = 0;
         for (int i = 0; i < 300; i++) {
-            long jitter = i % 3 == 1 ? -1_500_000 : i % 3 == 2 ? 1_500_000 : 0;
+            long jitter = i % 3 == 1 ? -10_000_000 : i % 3 == 2 ? 10_000_000 : 0;
             if (pacer.accept(1_000_000_000L + i * 1_000_000_000L / 30 + jitter, 30)) accepted++;
         }
         check(accepted == 300, "30 fps jitter discarded frames: " + accepted);

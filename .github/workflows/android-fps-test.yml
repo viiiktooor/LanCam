@@ -37,7 +37,7 @@ jobs:
         run: |
           test -n "$LANCAM_KEYSTORE_PASSWORD" || (echo "Signing password is missing" && exit 1)
           gradle --no-daemon verifyFramePipeline lintRelease assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk LanCam-Android-1.2.1-fps-teste-v2.apk
+          cp app/build/outputs/apk/release/app-release.apk LanCam-Android-1.2.1-fps-teste-v3.apk
       - name: Verify signature matches official APK
         run: |
           curl --fail --location --retry 3 \
@@ -45,18 +45,18 @@ jobs:
             --output "$RUNNER_TEMP/official.apk"
           SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           "$SIGNER" verify --print-certs "$RUNNER_TEMP/official.apk" > "$RUNNER_TEMP/official-cert.txt"
-          "$SIGNER" verify --print-certs LanCam-Android-1.2.1-fps-teste-v2.apk > "$RUNNER_TEMP/test-cert.txt"
+          "$SIGNER" verify --print-certs LanCam-Android-1.2.1-fps-teste-v3.apk > "$RUNNER_TEMP/test-cert.txt"
           EXPECTED=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/official-cert.txt")
           ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/test-cert.txt")
           test -n "$EXPECTED" && test "$EXPECTED" = "$ACTUAL"
           printf 'Certificate SHA-256: %s\nMatches official Android 1.2.1: yes\n' "$ACTUAL" > signature-verification.txt
-          sha256sum LanCam-Android-1.2.1-fps-teste-v2.apk > SHA256SUMS.txt
+          sha256sum LanCam-Android-1.2.1-fps-teste-v3.apk > SHA256SUMS.txt
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
-          name: LanCam-Android-fps-teste-v2
+          name: LanCam-Android-fps-teste-v3
           path: |
-            LanCam-Android-1.2.1-fps-teste-v2.apk
+            LanCam-Android-1.2.1-fps-teste-v3.apk
             SHA256SUMS.txt
             signature-verification.txt
           if-no-files-found: error

@@ -572,7 +572,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         return "{" +
                 "\"name\":\"LanCam\"," +
                 "\"version\":\"1.2.1\"," +
-                "\"pipeline\":\"nv21-v2\"," +
+                "\"pipeline\":\"nv21-v3\"," +
                 "\"camera\":\"" + (front ? "front" : "back") + "\"," +
                 "\"width\":" + w + "," +
                 "\"height\":" + h + "," +

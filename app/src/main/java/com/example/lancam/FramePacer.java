@@ -14,8 +14,10 @@ final class FramePacer {
             previousFps = fps;
             next = now;
         }
-        // Small callback jitter must not turn a 30 fps camera into a 15 fps stream.
-        long tolerance = Math.min(2_000_000L, interval / 10);
+        // Camera callback delivery can vary by several milliseconds even at a
+        // steady sensor cadence. Round to the nearest slot, preserving the phase
+        // and long-term cap without discarding on-time sensor frames as "early".
+        long tolerance = interval / 2;
         if (now + tolerance < next) return false;
         if (now - next >= interval) {
             next += ((now - next) / interval + 1) * interval;
