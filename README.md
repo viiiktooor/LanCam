@@ -2,15 +2,31 @@
 
 LanCam é um app Android simples que transforma o celular em uma câmera IP local.
 
-## O que faz
+## Versão 1.1.0
 
-- Abre a câmera traseira ou frontal.
-- Mantém um preview no aparelho.
-- Converte o preview em JPEG em aproximadamente 10 fps.
-- Abre um servidor HTTP na porta `4747`.
-- No computador, na mesma rede Wi‑Fi, abra o endereço mostrado no app, por exemplo `http://192.168.0.25:4747/`.
-- `http://IP:4747/stream` fornece MJPEG.
-- `http://IP:4747/shot.jpg` fornece um JPEG atual.
+- Câmera traseira ou frontal.
+- Preview no aparelho.
+- Stream MJPEG pela rede local.
+- Resolução selecionável: 640×480, 1280×720 ou 1920×1080. O app escolhe o tamanho suportado mais próximo pela câmera.
+- FPS selecionável: 5, 10, 15, 20 ou 30 fps.
+- Qualidade JPEG selecionável: 50%, 70%, 85% ou 95%.
+- Flash/torch quando a câmera suporta.
+- Espelhamento opcional da câmera frontal.
+- Correção de orientação do stream.
+- Endpoint JSON de status para integração futura com cliente de PC.
+- CORS habilitado nos endpoints HTTP para facilitar integração local.
+
+## Endereços
+
+Com celular e PC na mesma rede Wi‑Fi, abra o endereço mostrado no app, por exemplo:
+
+`http://192.168.0.25:4747/`
+
+Endpoints:
+
+- `/stream` ou `/video` — MJPEG contínuo.
+- `/shot.jpg` — JPEG atual.
+- `/api/status` — estado atual em JSON.
 
 ## Compilar
 
@@ -20,6 +36,10 @@ No Android Studio, abra a raiz do projeto e use **Build > Build APK(s)**.
 
 No GitHub, o workflow **Build Android APK** compila automaticamente um APK de debug e publica o arquivo como artefato `LanCam-debug-apk`.
 
-## Observações
+## Limites atuais
+
+O LanCam ainda é uma câmera IP. Ele não instala um dispositivo de webcam virtual no Windows e ainda não transmite áudio do microfone. O próximo estágio previsto é um cliente de PC e, depois, integração com webcam virtual.
+
+## Privacidade
 
 O app foi projetado para permanecer aberto em primeiro plano durante o uso. Ele não tenta esconder o uso da câmera e não transmite para servidores externos.
