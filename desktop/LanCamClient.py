@@ -16,7 +16,7 @@ from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 DEFAULT_PORT = 4747
 RELEASE_API = "https://api.github.com/repos/viiiktooor/LanCam/releases/latest"
 ASSET_PATTERN = re.compile(r"^LanCamClient-([0-9]+(?:\.[0-9]+){1,3})\.exe$", re.I)
@@ -152,11 +152,11 @@ class LanCamApp:
         top.pack(fill="x")
         tk.Label(top, text="IP ou URL do celular:").pack(side="left")
         self.address = tk.Entry(top)
-        self.address.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        self.address.pack(side="left", fill="x", expand=True, padx=8)
         self.connect_button = tk.Button(top, text="Conectar", width=12, command=self.toggle_connection)
         self.connect_button.pack(side="left")
         self.update_button = tk.Button(top, text="Atualizações", command=self.check_updates_async)
-        self.update_button.pack(side="left", padx=(8, 0))
+        self.update_button.pack(side="left", padx=8)
 
         status_box = tk.Frame(outer, pady=10)
         status_box.pack(fill="x")
@@ -174,8 +174,8 @@ class LanCamApp:
         self.preview = tk.Label(self.preview_frame, text="O preview aparecerá aqui após conectar.")
         self.preview.pack(fill="both", expand=True)
 
-        bottom = tk.Frame(outer, pady=(10, 0))
-        bottom.pack(fill="x")
+        bottom = tk.Frame(outer)
+        bottom.pack(fill="x", pady=10)
         tk.Label(
             bottom,
             text=("Este cliente 0.2 serve para testar o vídeo no PC sem OBS. "
