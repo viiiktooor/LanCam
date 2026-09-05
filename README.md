@@ -1,58 +1,47 @@
 # LanCam
 
-LanCam transforma um celular Android em uma câmera IP local e inclui um cliente leve para Windows. O projeto é pensado como um quebra-galho local: sem servidor próprio, sem conta, sem assinatura e sem serviço pago.
+### A câmera do celular, na tela do PC.
 
-## Android 1.2.1
+Transmita a imagem do seu Android pela rede local e acompanhe no Windows ou no navegador. Um quebra-galho gratuito para uso pessoal, sem conta, mensalidade ou servidor de vídeo na nuvem.
 
-- Câmera traseira ou frontal.
-- Preview no aparelho.
-- Stream MJPEG pela rede local.
-- Resolução selecionável: 640×480, 1280×720 ou 1920×1080 (o aparelho usa o tamanho suportado mais próximo).
-- FPS selecionável: 5, 10, 15, 20 ou 30 fps.
-- Qualidade JPEG selecionável: 50%, 70%, 85% ou 95%.
-- Flash/torch quando suportado.
+[**Baixar Android e Windows**](https://github.com/viiiktooor/LanCam/releases/latest)
+
+> **Este projeto é completamente vibe codado.** Foi criado por uma pessoa leiga, sem conhecimento de programação, usando IA para escrever e ajustar o código a partir de ideias e testes. É um experimento pessoal em desenvolvimento: pode ter bugs, limitações e comportamentos ainda não testados. Não é um produto profissional nem uma promessa de estabilidade.
+
+## Como funciona
+
+**Celular Android → rede local → imagem no PC**
+
+1. Instale e abra o LanCam no Android, permitindo o acesso à câmera.
+2. Deixe o celular e o computador na mesma rede. O PC pode estar conectado por cabo ao roteador.
+3. Abra o cliente LanCam no Windows e informe o endereço mostrado no celular.
+4. Conecte e acompanhe a imagem. Também é possível abrir esse endereço no navegador.
+
+## No celular
+
+- Câmeras frontal e traseira, com prévia da imagem no aparelho.
+- Resoluções de 640×480, 1280×720 e 1920×1080, conforme o suporte da câmera.
+- Ajuste de taxa de quadros de 5 a 30 FPS e de qualidade da imagem.
 - Espelhamento opcional da câmera frontal.
-- Correção de orientação do stream.
-- `/stream`, `/video`, `/shot.jpg` e `/api/status`.
-- Verificação automática de atualização usando a release pública mais recente deste repositório.
-- Quando há APK novo, o LanCam baixa o arquivo e abre o instalador do Android. O Android ainda exige confirmação do usuário e, no Android 8+, a permissão "Instalar apps desconhecidos" para o LanCam.
+- Flash quando disponível no aparelho.
 
-## Windows Client 0.2.1
+## No Windows
 
-O cliente 0.2 foi redesenhado para testes sem OBS e sem câmera virtual. Ele possui interface gráfica, conecta ao `/stream`, mostra preview, FPS recebido, taxa aproximada de rede, reconecta quando o stream cai e salva o último endereço usado.
+- Janela para assistir à transmissão ao vivo.
+- Indicadores de FPS recebido e uso aproximado da rede.
+- Reconexão automática quando a transmissão é interrompida.
+- Último endereço salvo para facilitar a próxima conexão.
 
-A versão 0.2.1 corrige incompatibilidade de espaçamento do Tkinter que fazia o 0.2.0 encerrar na abertura em alguns ambientes Windows/Tk com `TclError: bad screen distance`.
+## O que esperar
 
-Fluxo de teste atual:
+O LanCam ainda está sendo ajustado, principalmente para reduzir o atraso e melhorar a fluidez. Selecionar 30 FPS define um alvo; o resultado depende do celular, da resolução, da qualidade e da rede.
 
-`Android LanCam -> Wi-Fi/LAN -> LanCamClient.exe -> preview no PC`
+Por enquanto, o aplicativo transmite **somente vídeo pela rede local**. Não inclui áudio, conexão USB ou webcam virtual para aparecer como câmera em aplicativos de reunião.
 
-Ele também verifica a release pública mais recente. Quando encontra um `LanCamClient-X.Y.Z.exe` mais novo, oferece baixar, substitui o executável atual depois de fechá-lo e reinicia.
+## Onde o vídeo passa
 
-## Atualizações e assinatura Android
+A imagem sai diretamente do celular para os dispositivos que acessam o LanCam na rede local. O vídeo não é enviado para um servidor externo. O aplicativo consulta o GitHub para verificar e baixar atualizações.
 
-O atualizador usa GitHub Releases, que funciona sem token porque este repositório é público. Para o Android aceitar uma versão nova por cima da anterior, todos os APKs de release precisam ser assinados para sempre com a mesma chave.
+---
 
-A chave privada **não deve ser adicionada ao repositório**. O workflow `Publish LanCam Release` espera dois GitHub Actions Secrets:
-
-- `ANDROID_KEYSTORE_BASE64`
-- `ANDROID_KEYSTORE_PASSWORD`
-
-O workflow só publica uma release quando `release/version.txt` é alterado. Isso evita criar releases a cada commit de desenvolvimento.
-
-## Build de desenvolvimento
-
-- `Build Android APK` gera APK debug para testar compilação e funções.
-- `Build Windows Client` gera o cliente Windows de teste.
-- `Publish LanCam Release` gera os arquivos de atualização reais e exige a chave Android estável.
-
-## Limites atuais
-
-- O cliente 0.2 ainda não cria uma webcam virtual no Windows.
-- Ainda não há áudio/microfone.
-- Ainda não há USB/ADB.
-- O executável Windows não possui assinatura de código comercial; isso pode causar avisos de reputação do Windows.
-
-## Privacidade
-
-O vídeo é servido diretamente pelo celular na rede local. O LanCam não envia o stream para servidor externo. O acesso ao GitHub é usado apenas para verificar e baixar novas versões publicadas.
+Feito por curiosidade, necessidade e tentativa e erro — com muita ajuda de IA.
