@@ -3,10 +3,7 @@ package com.example.lancam;
 import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
-import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.graphics.YuvImage;
@@ -75,6 +72,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final FramePacer framePacer = new FramePacer();
     private LatestFrameWorker<RawFrame> encoder;
+    // Accessed only by the single encoder worker; reused across frames.
+    private byte[] transformedNv21;
+    private final ByteArrayOutputStream jpegOutput = new ByteArrayOutputStream(256 * 1024);
     private long cameraGeneration;
     private long statsStarted;
     private int capturedFrames;
@@ -421,15 +421,25 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         long started = SystemClock.elapsedRealtimeNanos();
         byte[] result = null;
         try {
-            int firstPassQuality = (frame.rotation != 0 || frame.mirror) ? 92 : frame.quality;
-            YuvImage yuv = new YuvImage(frame.data, ImageFormat.NV21,
-                    frame.width, frame.height, null);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            if (yuv.compressToJpeg(new Rect(0, 0, frame.width, frame.height), firstPassQuality, out)) {
-                result = out.toByteArray();
-                if (frame.rotation != 0 || frame.mirror) {
-                    result = transformJpeg(result, frame.rotation, frame.mirror, frame.quality);
+            byte[] pixels = frame.data;
+            int width = frame.width;
+            int height = frame.height;
+            if (frame.rotation != 0 || frame.mirror) {
+                int required = width * height * 3 / 2;
+                if (transformedNv21 == null || transformedNv21.length != required) {
+                    transformedNv21 = new byte[required];
                 }
+                Nv21Transform.transform(frame.data, transformedNv21, width, height, frame.rotation, frame.mirror);
+                pixels = transformedNv21;
+                if (frame.rotation == 90 || frame.rotation == 270) {
+                    width = frame.height;
+                    height = frame.width;
+                }
+            }
+            YuvImage yuv = new YuvImage(pixels, ImageFormat.NV21, width, height, null);
+            jpegOutput.reset();
+            if (yuv.compressToJpeg(new Rect(0, 0, width, height), frame.quality, jpegOutput)) {
+                result = jpegOutput.toByteArray();
             }
         } catch (RuntimeException e) {
             Log.w("LanCam", "Falha ao converter quadro", e);
@@ -481,29 +491,6 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         encodingNanos = 0;
         statsStarted = now;
         updateStatus();
-    }
-
-    private byte[] transformJpeg(byte[] jpg, int rotation, boolean mirror, int quality) {
-        Bitmap src = null;
-        Bitmap transformed = null;
-        try {
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inPreferredConfig = Bitmap.Config.RGB_565;
-            src = BitmapFactory.decodeByteArray(jpg, 0, jpg.length, options);
-            if (src == null) return jpg;
-            Matrix matrix = new Matrix();
-            if (rotation != 0) matrix.postRotate(rotation);
-            if (mirror) matrix.postScale(-1f, 1f);
-            transformed = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), matrix, true);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            transformed.compress(Bitmap.CompressFormat.JPEG, quality, out);
-            return out.toByteArray();
-        } catch (RuntimeException e) {
-            return jpg;
-        } finally {
-            if (transformed != null && transformed != src && !transformed.isRecycled()) transformed.recycle();
-            if (src != null && !src.isRecycled()) src.recycle();
-        }
     }
 
     private void applyTorch() {
@@ -585,6 +572,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         return "{" +
                 "\"name\":\"LanCam\"," +
                 "\"version\":\"1.2.1\"," +
+                "\"pipeline\":\"nv21-v2\"," +
                 "\"camera\":\"" + (front ? "front" : "back") + "\"," +
                 "\"width\":" + w + "," +
                 "\"height\":" + h + "," +

@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit;
 /** Standalone JVM regression tests: run with javac/java, no Android device needed. */
 public final class FramePipelineTest {
     public static void main(String[] args) throws Exception {
+        Nv21TransformTest.run();
         jitterDoesNotHalveFps();
         lowerTargetsRemainLimited();
         changingTargetAndRestartResetDeadline();

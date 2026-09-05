@@ -50,6 +50,8 @@ dependencies {
 
 def compileFramePipelineTests = tasks.register('compileFramePipelineTests', JavaCompile) {
     source files('src/main/java/com/example/lancam/FramePacer.java',
+            'src/main/java/com/example/lancam/Nv21Transform.java',
+            'src/test/java/com/example/lancam/Nv21TransformTest.java',
             'src/main/java/com/example/lancam/LatestFrameWorker.java',
             'src/test/java/com/example/lancam/FramePipelineTest.java')
     classpath = files()
