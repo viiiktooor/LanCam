@@ -2,7 +2,7 @@
 
 ## Publicação
 
-Release de encerramento **1.2.2** preparada, aguardando conclusão do workflow de publicação. Inclui Android **1.2.2 / versionCode 5** e Windows Client **0.2.2**.
+Release de encerramento **1.2.2 publicada**, marcada como versão mais recente no GitHub. Workflow 33979717832 concluído com sucesso. Inclui Android **1.2.2 / versionCode 5** e Windows Client **0.2.2**.
 
 - Repositório: https://github.com/viiiktooor/LanCam
 - Release: https://github.com/viiiktooor/LanCam/releases/tag/v1.2.2
@@ -41,3 +41,9 @@ Relatório e limites: [OTIMIZACAO-FPS.md](OTIMIZACAO-FPS.md). Evidências: [evid
 Preservar a mesma assinatura Android. Não colocar chaves/senhas no repositório. Não desinstalar para contornar falha de assinatura. Alterar release/version.txt e enviar para main aciona a publicação. Fotos locais de diagnóstico não foram enviadas ao GitHub.
 
 A implementação final funcional corresponde à versão nv21-v3, acrescida dos números oficiais de versão. As branches de testes permanecem como histórico; a main reúne o estado entregue.
+
+## Conferência dos arquivos publicados
+
+APK e EXE baixados da release oficial; SHA-256 conferido contra GitHub e SHA256SUMS.txt. Certificado Android conferido contra a chave oficial. Android 1.2.2 instalado por cima no S23 e aberto: teste de cinco segundos recebeu e decodificou 138 JPEGs HD sem erro. Cliente Windows 0.2.2 aberto e título da janela confirmado. São verificações de instalação/abertura, não teste prolongado nem validação completa do atualizador Windows.
+
+Arquivos locais em C:\LanCam\releases\1.2.2. Os dois instaladores e SHA256SUMS.txt estão anexados à release. Evidências adicionais em docs/evidence/official-1.2.2-smoke-*.json.
