@@ -2,7 +2,7 @@
 
 LanCam transforma um celular Android em uma câmera IP local e inclui um cliente leve para Windows. O projeto é pensado como um quebra-galho local: sem servidor próprio, sem conta, sem assinatura e sem serviço pago.
 
-## Android 1.2.0
+## Android 1.2.1
 
 - Câmera traseira ou frontal.
 - Preview no aparelho.
@@ -17,9 +17,11 @@ LanCam transforma um celular Android em uma câmera IP local e inclui um cliente
 - Verificação automática de atualização usando a release pública mais recente deste repositório.
 - Quando há APK novo, o LanCam baixa o arquivo e abre o instalador do Android. O Android ainda exige confirmação do usuário e, no Android 8+, a permissão "Instalar apps desconhecidos" para o LanCam.
 
-## Windows Client 0.2.0
+## Windows Client 0.2.1
 
 O cliente 0.2 foi redesenhado para testes sem OBS e sem câmera virtual. Ele possui interface gráfica, conecta ao `/stream`, mostra preview, FPS recebido, taxa aproximada de rede, reconecta quando o stream cai e salva o último endereço usado.
+
+A versão 0.2.1 corrige incompatibilidade de espaçamento do Tkinter que fazia o 0.2.0 encerrar na abertura em alguns ambientes Windows/Tk com `TclError: bad screen distance`.
 
 Fluxo de teste atual:
 
