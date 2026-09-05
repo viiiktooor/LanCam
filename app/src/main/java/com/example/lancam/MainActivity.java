@@ -8,6 +8,8 @@ import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.graphics.YuvImage;
 import android.hardware.Camera;
+import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -84,6 +86,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private volatile String performanceJson = "\"captureFps\":0,\"encodedFps\":0,\"encodeMs\":0,\"replacedFrames\":0";
     private String performanceText = "medindo FPS…";
     private MjpegServer server;
+    private WifiManager.WifiLock streamingWifiLock;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -288,6 +291,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             int bufferSize = previewSize.width * previewSize.height * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
             for (int i = 0; i < 3; i++) camera.addCallbackBuffer(new byte[bufferSize]);
             camera.startPreview();
+            acquireStreamingWifi();
             refreshTorchButton();
             updateStatus();
         } catch (Exception e) {
@@ -538,6 +542,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void releaseCamera() {
+        releaseStreamingWifi();
         cameraGeneration++;
         if (encoder != null) encoder.clearPending();
         latestFrame.set(null);
@@ -565,6 +570,28 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 size, targetFps, jpegQuality, front ? "frontal" : "traseira", performanceText));
     }
 
+    private void acquireStreamingWifi() {
+        try {
+            WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+            if (wifi == null) return;
+            int mode = Build.VERSION.SDK_INT >= 29 ? WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                    : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+            streamingWifiLock = wifi.createWifiLock(mode, "LanCam:stream");
+            streamingWifiLock.setReferenceCounted(false);
+            streamingWifiLock.acquire();
+        } catch (RuntimeException e) {
+            Log.w("LanCam", "Modo Wi-Fi de streaming indisponível", e);
+            releaseStreamingWifi();
+        }
+    }
+
+    private void releaseStreamingWifi() {
+        if (streamingWifiLock == null) return;
+        try { if (streamingWifiLock.isHeld()) streamingWifiLock.release(); }
+        catch (RuntimeException e) { Log.w("LanCam", "Falha ao liberar modo Wi-Fi", e); }
+        streamingWifiLock = null;
+    }
+
     private String statusJson() {
         Camera.Size size = previewSize;
         int w = size == null ? targetWidth : size.width;
@@ -572,7 +599,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         return "{" +
                 "\"name\":\"LanCam\"," +
                 "\"version\":\"1.2.1\"," +
-                "\"pipeline\":\"nv21-v3\"," +
+                "\"pipeline\":\"nv21-v4-wifi\"," +
                 "\"camera\":\"" + (front ? "front" : "back") + "\"," +
                 "\"width\":" + w + "," +
                 "\"height\":" + h + "," +
