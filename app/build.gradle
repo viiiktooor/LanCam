@@ -47,3 +47,24 @@ android {
 dependencies {
     implementation 'androidx.core:core:1.15.0'
 }
+
+def compileFramePipelineTests = tasks.register('compileFramePipelineTests', JavaCompile) {
+    source files('src/main/java/com/example/lancam/FramePacer.java',
+            'src/main/java/com/example/lancam/Nv21Transform.java',
+            'src/test/java/com/example/lancam/Nv21TransformTest.java',
+            'src/main/java/com/example/lancam/LatestFrameWorker.java',
+            'src/test/java/com/example/lancam/FramePipelineTest.java')
+    classpath = files()
+    destinationDirectory = layout.buildDirectory.dir('frame-pipeline-tests')
+    options.release = 8
+}
+
+tasks.register('verifyFramePipeline', JavaExec) {
+    group = 'verification'
+    description = 'Checks FPS pacing and the bounded latest-frame worker on the JVM.'
+    dependsOn compileFramePipelineTests
+    classpath = files(compileFramePipelineTests.flatMap { it.destinationDirectory })
+    mainClass = 'com.example.lancam.FramePipelineTest'
+}
+
+tasks.named('check') { dependsOn 'verifyFramePipeline' }

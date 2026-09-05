@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -21,6 +22,7 @@ DEFAULT_PORT = 4747
 RELEASE_API = "https://api.github.com/repos/viiiktooor/LanCam/releases/latest"
 ASSET_PATTERN = re.compile(r"^LanCamClient-([0-9]+(?:\.[0-9]+){1,3})\.exe$", re.I)
 USER_AGENT = f"LanCamClient/{APP_VERSION}"
+MAX_FRAME_BYTES = 16 * 1024 * 1024
 
 
 def normalize_base(value: str) -> str:
@@ -68,22 +70,27 @@ class StreamWorker(threading.Thread):
     def stop(self):
         self.stop_event.set()
 
+    def notify(self, fn, *args):
+        self.app.ui(fn, *args, source=self)
+
     def run(self):
         while not self.stop_event.is_set():
             try:
                 status = get_status(self.base)
-                self.app.ui(self.app.on_connecting, self.base, status)
+                if self.stop_event.is_set():
+                    return
+                self.notify(self.app.on_connecting, self.base, status)
                 req = urllib.request.Request(
                     self.base + "/stream",
                     headers={"User-Agent": USER_AGENT, "Cache-Control": "no-cache"},
                 )
                 with urllib.request.urlopen(req, timeout=7) as response:
-                    self.app.ui(self.app.on_connected, self.base, status)
+                    self.notify(self.app.on_connected, self.base, status)
                     self.read_mjpeg(response)
             except Exception as exc:
                 if self.stop_event.is_set():
                     break
-                self.app.ui(self.app.on_stream_error, str(exc))
+                self.notify(self.app.on_stream_error, str(exc))
                 for _ in range(10):
                     if self.stop_event.is_set():
                         return
@@ -93,8 +100,9 @@ class StreamWorker(threading.Thread):
         buffer = bytearray()
         frame_count = 0
         sample_started = time.monotonic()
+        self.bytes_received = 0
         while not self.stop_event.is_set():
-            chunk = response.read(8192)
+            chunk = response.read1(8192)
             if not chunk:
                 raise ConnectionError("O celular encerrou o stream.")
             self.bytes_received += len(chunk)
@@ -110,19 +118,24 @@ class StreamWorker(threading.Thread):
                 if end < 0:
                     if start > 0:
                         del buffer[:start]
+                    if len(buffer) > MAX_FRAME_BYTES:
+                        raise ConnectionError("Quadro de vídeo excedeu o limite de tamanho.")
                     break
+
+                if end + 2 - start > MAX_FRAME_BYTES:
+                    raise ConnectionError("Quadro de vídeo excedeu o limite de tamanho.")
 
                 jpg = bytes(buffer[start:end + 2])
                 del buffer[:end + 2]
                 frame_count += 1
-                self.app.ui(self.app.on_frame, jpg)
+                self.app.submit_frame(self, jpg)
 
                 now = time.monotonic()
                 elapsed = now - sample_started
                 if elapsed >= 1.0:
                     fps = frame_count / elapsed
                     mbps = (self.bytes_received * 8.0 / elapsed) / 1_000_000.0
-                    self.app.ui(self.app.on_stats, fps, mbps)
+                    self.notify(self.app.on_stats, fps, mbps)
                     frame_count = 0
                     self.bytes_received = 0
                     sample_started = now
@@ -139,10 +152,14 @@ class LanCamApp:
         self.current_image = None
         self.connected = False
         self.closing = False
+        self.ui_events = queue.SimpleQueue()
+        self.frame_lock = threading.Lock()
+        self.pending_frame = None
         self.build_ui()
         self.load_last_address()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(1200, self.check_updates_async)
+        self.root.after(15, self.drain_ui)
 
     def build_ui(self):
         outer = tk.Frame(self.root, padx=14, pady=14)
@@ -185,9 +202,33 @@ class LanCamApp:
         ).pack(side="left", fill="x", expand=True)
         tk.Label(bottom, text=f"v{APP_VERSION}").pack(side="right")
 
-    def ui(self, fn, *args):
+    def ui(self, fn, *args, source=None):
         if not self.closing:
-            self.root.after(0, lambda: fn(*args))
+            self.ui_events.put((source, fn, args))
+
+    def submit_frame(self, source, jpg):
+        with self.frame_lock:
+            if not self.closing and source is self.worker:
+                self.pending_frame = (source, jpg)
+
+    def drain_ui(self):
+        if self.closing:
+            return
+        for _ in range(100):
+            try:
+                source, fn, args = self.ui_events.get_nowait()
+            except queue.Empty:
+                break
+            if source is None or source is self.worker:
+                fn(*args)
+            if self.closing:
+                return
+        with self.frame_lock:
+            frame = self.pending_frame
+            self.pending_frame = None
+        if frame is not None and frame[0] is self.worker:
+            self.on_frame(frame[1])
+        self.root.after(15, self.drain_ui)
 
     def settings_path(self):
         base = Path(os.environ.get("APPDATA") or Path.home()) / "LanCam"
@@ -230,6 +271,8 @@ class LanCamApp:
     def disconnect(self):
         worker = self.worker
         self.worker = None
+        with self.frame_lock:
+            self.pending_frame = None
         if worker:
             worker.stop()
         self.connected = False

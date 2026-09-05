@@ -3,16 +3,16 @@ package com.example.lancam;
 import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
-import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.graphics.YuvImage;
 import android.hardware.Camera;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.TextureView;
 import android.view.WindowManager;
@@ -69,12 +69,26 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private volatile int targetFps = 10;
     private volatile int jpegQuality = 70;
     private volatile int streamRotation;
-    private long lastFrameTime;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final FramePacer framePacer = new FramePacer();
+    private LatestFrameWorker<RawFrame> encoder;
+    // Accessed only by the single encoder worker; reused across frames.
+    private byte[] transformedNv21;
+    private final ByteArrayOutputStream jpegOutput = new ByteArrayOutputStream(256 * 1024);
+    private long cameraGeneration;
+    private long statsStarted;
+    private int capturedFrames;
+    private int encodedFrames;
+    private int replacedFrames;
+    private long encodingNanos;
+    private volatile String performanceJson = "\"captureFps\":0,\"encodedFps\":0,\"encodeMs\":0,\"replacedFrames\":0";
+    private String performanceText = "medindo FPS…";
     private MjpegServer server;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        encoder = new LatestFrameWorker<>(this::encodeFrame);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         buildUi();
         server = new MjpegServer(PORT, latestFrame, this::statusJson);
@@ -141,8 +155,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         Spinner fps = makeSpinner(FPS_LABELS, 1);
         fps.setOnItemSelectedListener(new SimpleSelectionListener() {
             @Override public void selected(int position) {
-                targetFps = FPS_VALUES[position];
-                updateStatus();
+                int selectedFps = FPS_VALUES[position];
+                if (selectedFps == targetFps) return;
+                targetFps = selectedFps;
+                restartCamera();
             }
         });
         controls.addView(fps, new LinearLayout.LayoutParams(0,
@@ -227,6 +243,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override
     protected void onDestroy() {
         releaseCamera();
+        if (encoder != null) encoder.close();
         if (server != null) server.shutdown();
         super.onDestroy();
     }
@@ -241,6 +258,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void openCamera(SurfaceTexture surface) {
+        if (camera != null) return;
         try {
             int id = chooseCamera(front);
             if (id < 0) throw new IllegalStateException("Nenhuma câmera encontrada");
@@ -264,7 +282,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             camera.setDisplayOrientation(displayRotation);
             surface.setDefaultBufferSize(previewSize.width, previewSize.height);
             camera.setPreviewTexture(surface);
-            camera.setPreviewCallback(this);
+            framePacer.reset();
+            resetPerformance();
+            camera.setPreviewCallbackWithBuffer(this);
+            int bufferSize = previewSize.width * previewSize.height * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
+            for (int i = 0; i < 3; i++) camera.addCallbackBuffer(new byte[bufferSize]);
             camera.startPreview();
             refreshTorchButton();
             updateStatus();
@@ -360,49 +382,115 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     @Override
     public void onPreviewFrame(byte[] data, Camera source) {
-        if (previewSize == null || data == null) return;
-        long now = SystemClock.elapsedRealtime();
-        long interval = Math.max(1L, 1000L / Math.max(1, targetFps));
-        if (now - lastFrameTime < interval) return;
-        lastFrameTime = now;
-
-        try {
-            int firstPassQuality = (streamRotation != 0 || (front && mirrorFront)) ? 92 : jpegQuality;
-            YuvImage yuv = new YuvImage(data, ImageFormat.NV21,
-                    previewSize.width, previewSize.height, null);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            if (!yuv.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), firstPassQuality, out)) {
-                return;
-            }
-            byte[] jpg = out.toByteArray();
-            if (streamRotation != 0 || (front && mirrorFront)) {
-                jpg = transformJpeg(jpg, streamRotation, front && mirrorFront, jpegQuality);
-            }
-            if (jpg != null) latestFrame.set(jpg);
-        } catch (RuntimeException ignored) { }
+        if (source != camera || previewSize == null || data == null) return;
+        capturedFrames++;
+        refreshPerformance();
+        if (!framePacer.accept(SystemClock.elapsedRealtimeNanos(), targetFps)) {
+            returnBuffer(data, source, cameraGeneration);
+            return;
+        }
+        RawFrame frame = new RawFrame(data, source, cameraGeneration, previewSize.width,
+                previewSize.height, streamRotation, front && mirrorFront, jpegQuality);
+        RawFrame discarded = encoder.submit(frame);
+        if (discarded != null) {
+            replacedFrames++;
+            returnBuffer(discarded.data, discarded.source, discarded.generation);
+        }
     }
 
-    private byte[] transformJpeg(byte[] jpg, int rotation, boolean mirror, int quality) {
-        Bitmap src = null;
-        Bitmap transformed = null;
-        try {
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inPreferredConfig = Bitmap.Config.RGB_565;
-            src = BitmapFactory.decodeByteArray(jpg, 0, jpg.length, options);
-            if (src == null) return jpg;
-            Matrix matrix = new Matrix();
-            if (rotation != 0) matrix.postRotate(rotation);
-            if (mirror) matrix.postScale(-1f, 1f);
-            transformed = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), matrix, true);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            transformed.compress(Bitmap.CompressFormat.JPEG, quality, out);
-            return out.toByteArray();
-        } catch (RuntimeException e) {
-            return jpg;
-        } finally {
-            if (transformed != null && transformed != src && !transformed.isRecycled()) transformed.recycle();
-            if (src != null && !src.isRecycled()) src.recycle();
+    private static final class RawFrame {
+        final byte[] data;
+        final Camera source;
+        final long generation;
+        final int width, height, rotation, quality;
+        final boolean mirror;
+        RawFrame(byte[] data, Camera source, long generation, int width, int height,
+                 int rotation, boolean mirror, int quality) {
+            this.data = data;
+            this.source = source;
+            this.generation = generation;
+            this.width = width;
+            this.height = height;
+            this.rotation = rotation;
+            this.mirror = mirror;
+            this.quality = quality;
         }
+    }
+
+    private void encodeFrame(RawFrame frame) {
+        long started = SystemClock.elapsedRealtimeNanos();
+        byte[] result = null;
+        try {
+            byte[] pixels = frame.data;
+            int width = frame.width;
+            int height = frame.height;
+            if (frame.rotation != 0 || frame.mirror) {
+                int required = width * height * 3 / 2;
+                if (transformedNv21 == null || transformedNv21.length != required) {
+                    transformedNv21 = new byte[required];
+                }
+                Nv21Transform.transform(frame.data, transformedNv21, width, height, frame.rotation, frame.mirror);
+                pixels = transformedNv21;
+                if (frame.rotation == 90 || frame.rotation == 270) {
+                    width = frame.height;
+                    height = frame.width;
+                }
+            }
+            YuvImage yuv = new YuvImage(pixels, ImageFormat.NV21, width, height, null);
+            jpegOutput.reset();
+            if (yuv.compressToJpeg(new Rect(0, 0, width, height), frame.quality, jpegOutput)) {
+                result = jpegOutput.toByteArray();
+            }
+        } catch (RuntimeException e) {
+            Log.w("LanCam", "Falha ao converter quadro", e);
+        } finally {
+            final byte[] jpg = result;
+            final long duration = SystemClock.elapsedRealtimeNanos() - started;
+            // Camera API calls and publication stay on its owning thread. An old
+            // encoder completion cannot publish or return a buffer to a new camera.
+            mainHandler.post(() -> {
+                if (camera == frame.source && cameraGeneration == frame.generation) {
+                    if (jpg != null) {
+                        latestFrame.set(jpg);
+                        encodedFrames++;
+                        encodingNanos += duration;
+                    }
+                    returnBuffer(frame.data, frame.source, frame.generation);
+                }
+            });
+        }
+    }
+
+    private void returnBuffer(byte[] data, Camera source, long generation) {
+        if (source != camera || generation != cameraGeneration) return;
+        try { source.addCallbackBuffer(data); }
+        catch (RuntimeException e) { Log.w("LanCam", "Falha ao devolver buffer", e); }
+    }
+
+    private void resetPerformance() {
+        statsStarted = SystemClock.elapsedRealtimeNanos();
+        capturedFrames = encodedFrames = replacedFrames = 0;
+        encodingNanos = 0;
+        performanceText = "medindo FPS…";
+        performanceJson = "\"captureFps\":0,\"encodedFps\":0,\"encodeMs\":0,\"replacedFrames\":0";
+    }
+
+    private void refreshPerformance() {
+        long now = SystemClock.elapsedRealtimeNanos();
+        long elapsed = now - statsStarted;
+        if (elapsed < 1_000_000_000L) return;
+        double captureFps = capturedFrames * 1_000_000_000.0 / elapsed;
+        double encodedFps = encodedFrames * 1_000_000_000.0 / elapsed;
+        double encodeMs = encodedFrames == 0 ? 0 : encodingNanos / (encodedFrames * 1_000_000.0);
+        performanceText = String.format(Locale.US, "câmera %.1f · vídeo %.1f FPS · %.1f ms/quadro",
+                captureFps, encodedFps, encodeMs);
+        performanceJson = String.format(Locale.US,
+                "\"captureFps\":%.1f,\"encodedFps\":%.1f,\"encodeMs\":%.1f,\"replacedFrames\":%d",
+                captureFps, encodedFps, encodeMs, replacedFrames);
+        capturedFrames = encodedFrames = replacedFrames = 0;
+        encodingNanos = 0;
+        statsStarted = now;
+        updateStatus();
     }
 
     private void applyTorch() {
@@ -450,8 +538,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void releaseCamera() {
+        cameraGeneration++;
+        if (encoder != null) encoder.clearPending();
+        latestFrame.set(null);
+        framePacer.reset();
+        resetPerformance();
         if (camera == null) return;
-        try { camera.setPreviewCallback(null); } catch (Exception ignored) { }
+        try { camera.setPreviewCallbackWithBuffer(null); } catch (Exception ignored) { }
         try { camera.stopPreview(); } catch (Exception ignored) { }
         try { camera.release(); } catch (Exception ignored) { }
         camera = null;
@@ -468,8 +561,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             status.setText("No PC: http://" + ip + ":" + PORT + "/");
         }
         String size = previewSize == null ? targetWidth + "×" + targetHeight : previewSize.width + "×" + previewSize.height;
-        details.setText(String.format(Locale.US, "%s · %d fps · JPEG %d%% · %s",
-                size, targetFps, jpegQuality, front ? "frontal" : "traseira"));
+        details.setText(String.format(Locale.US, "%s · alvo %d fps · JPEG %d%% · %s\n%s",
+                size, targetFps, jpegQuality, front ? "frontal" : "traseira", performanceText));
     }
 
     private String statusJson() {
@@ -478,14 +571,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         int h = size == null ? targetHeight : size.height;
         return "{" +
                 "\"name\":\"LanCam\"," +
-                "\"version\":\"1.1.0\"," +
+                "\"version\":\"1.2.1\"," +
+                "\"pipeline\":\"nv21-v3\"," +
                 "\"camera\":\"" + (front ? "front" : "back") + "\"," +
                 "\"width\":" + w + "," +
                 "\"height\":" + h + "," +
                 "\"fps\":" + targetFps + "," +
                 "\"jpegQuality\":" + jpegQuality + "," +
                 "\"mirrorFront\":" + mirrorFront + "," +
-                "\"torch\":" + torchEnabled +
+                "\"torch\":" + torchEnabled + "," + performanceJson +
                 "}";
     }
 
