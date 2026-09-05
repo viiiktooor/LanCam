@@ -267,6 +267,9 @@ class LanCamApp:
     def on_stats(self, fps, mbps):
         self.stats_label.configure(text=f"Recepção: {fps:.1f} fps · {mbps:.2f} Mbit/s")
 
+    def set_message(self, text):
+        self.message_label.configure(text=text)
+
     def on_frame(self, jpg: bytes):
         try:
             image = Image.open(io.BytesIO(jpg)).convert("RGB")
@@ -328,7 +331,7 @@ class LanCamApp:
 
     def download_update(self, version, asset):
         try:
-            self.ui(self.message_label.configure, text=f"Baixando LanCam Client {version}...")
+            self.ui(self.set_message, f"Baixando LanCam Client {version}...")
             url = asset["browser_download_url"]
             target = Path(tempfile.gettempdir()) / f"LanCamClient-{version}.exe"
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
