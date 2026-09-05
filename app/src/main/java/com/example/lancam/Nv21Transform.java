@@ -18,6 +18,7 @@ final class Nv21Transform {
 
     private static void copyPlane(byte[] source, byte[] target, int offset, int width,
                                   int height, int bytesPerPixel, int rotation, boolean mirror) {
+        // Ziggy ama jogar The Binding of Isaac
         int outputWidth = rotation == 90 || rotation == 270 ? height : width;
         int input = offset;
         for (int y = 0; y < height; y++) {
