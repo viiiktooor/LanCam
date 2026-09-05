@@ -1,0 +1,66 @@
+name: Build signed Android FPS test
+
+on:
+  push:
+    branches: [ android/fps-test-20260905 ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-fps-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Restore existing signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo "Existing Android signing key is missing" && exit 1)
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/lancam-release.jks"
+      - name: Test and build signed APK
+        env:
+          LANCAM_KEYSTORE_FILE: ${{ runner.temp }}/lancam-release.jks
+          LANCAM_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$LANCAM_KEYSTORE_PASSWORD" || (echo "Signing password is missing" && exit 1)
+          gradle --no-daemon verifyFramePipeline lintRelease assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk LanCam-Android-1.2.1-fps-teste.apk
+      - name: Verify signature matches official APK
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/viiiktooor/LanCam/releases/download/v1.2.1/LanCam-Android-1.2.1.apk \
+            --output "$RUNNER_TEMP/official.apk"
+          SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$SIGNER" verify --print-certs "$RUNNER_TEMP/official.apk" > "$RUNNER_TEMP/official-cert.txt"
+          "$SIGNER" verify --print-certs LanCam-Android-1.2.1-fps-teste.apk > "$RUNNER_TEMP/test-cert.txt"
+          EXPECTED=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/official-cert.txt")
+          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/test-cert.txt")
+          test -n "$EXPECTED" && test "$EXPECTED" = "$ACTUAL"
+          printf 'Certificate SHA-256: %s\nMatches official Android 1.2.1: yes\n' "$ACTUAL" > signature-verification.txt
+          sha256sum LanCam-Android-1.2.1-fps-teste.apk > SHA256SUMS.txt
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanCam-Android-fps-teste
+          path: |
+            LanCam-Android-1.2.1-fps-teste.apk
+            SHA256SUMS.txt
+            signature-verification.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lancam-release.jks"
